@@ -70,6 +70,7 @@
    any architecture (using miniinterpreter)
    -------------------------------------------------------------------------- */
 
+RTS_PRIVATE
 StgRegTable * StgRun(StgFunPtr f, StgRegTable *basereg STG_UNUSED)
 {
     while (f) {
@@ -83,6 +84,7 @@ StgRegTable * StgRun(StgFunPtr f, StgRegTable *basereg STG_UNUSED)
     return (StgRegTable *)R1.p;
 }
 
+RTS_PRIVATE
 StgFunPtr StgReturn(void)
 {
     return 0;
@@ -118,8 +120,10 @@ StgWord8 *win32AllocStack(void)
 
 #ifdef darwin_HOST_OS
 #define STG_GLOBAL ".globl "
+#define STG_HIDDEN ".private_extern "
 #else
 #define STG_GLOBAL ".global "
+#define STG_HIDDEN ".hidden "
 #endif
 
 /*
@@ -164,6 +168,7 @@ StgRunIsImplementedInAssembler(void)
 {
     __asm__ volatile (
         STG_GLOBAL STG_RUN "\n"
+        STG_HIDDEN STG_RUN "\n"
         STG_RUN ":\n\t"
 
         /*
@@ -200,6 +205,7 @@ StgRunIsImplementedInAssembler(void)
         "jmp *%%eax\n\t"
 
         STG_GLOBAL STG_RETURN "\n"
+        STG_HIDDEN STG_RETURN "\n"
         STG_RETURN ":\n\t"
 
         "movl %%esi, %%eax\n\t"   /* Return value in R1  */
@@ -236,7 +242,13 @@ StgRunIsImplementedInAssembler(void)
 
 #ifdef x86_64_HOST_ARCH
 
-extern StgRegTable * StgRun(StgFunPtr f, StgRegTable *basereg);
+#define STG_GLOBAL ".globl "
+
+#ifdef darwin_HOST_OS
+#define STG_HIDDEN ".private_extern "
+#else
+#define STG_HIDDEN ".hidden "
+#endif
 
 static void GNUC3_ATTRIBUTE(used)
 StgRunIsImplementedInAssembler(void)
@@ -245,7 +257,8 @@ StgRunIsImplementedInAssembler(void)
         /*
          * save callee-saves registers on behalf of the STG code.
          */
-        ".globl " STG_RUN "\n"
+        STG_GLOBAL STG_RUN "\n"
+        STG_HIDDEN STG_RUN "\n"
         STG_RUN ":\n\t"
         "subq %1, %%rsp\n\t"
         "movq %%rsp, %%rax\n\t"
@@ -279,8 +292,9 @@ StgRunIsImplementedInAssembler(void)
 #endif
         "jmp *%%rax\n\t"
 
-        ".globl " STG_RETURN "\n"
-         STG_RETURN ":\n\t"
+        STG_GLOBAL STG_RETURN "\n"
+        STG_HIDDEN STG_RETURN "\n"
+        STG_RETURN ":\n\t"
 
         "movq %%rbx, %%rax\n\t"   /* Return value in R1  */
 
@@ -351,6 +365,7 @@ StgRunIsImplementedInAssembler(void)
 
 #ifdef sparc_HOST_ARCH
 
+RTS_PRIVATE
 StgRegTable *
 StgRun(StgFunPtr f, StgRegTable *basereg) {
 
@@ -363,6 +378,7 @@ StgRun(StgFunPtr f, StgRegTable *basereg) {
     __asm__ volatile (
                  ".align 4\n"
                  ".global " STG_RETURN "\n"
+                 ".hidden " STG_RETURN "\n"
                  STG_RETURN ":"
                  : : "p" (space) : "l0","l1","l2","l3","l4","l5","l6","l7");
     /* we tell the C compiler that l0-l7 are clobbered on return to
@@ -400,7 +416,13 @@ StgRun(StgFunPtr f, StgRegTable *basereg) {
 
 #ifdef powerpc_HOST_ARCH
 
-extern StgRegTable * StgRun(StgFunPtr f, StgRegTable *basereg);
+#define STG_GLOBAL ".globl "
+
+#ifdef darwin_HOST_OS
+#define STG_HIDDEN ".private_extern "
+#else
+#define STG_HIDDEN ".hidden "
+#endif
 
 #ifdef darwin_HOST_OS
 void StgRunIsImplementedInAssembler(void)
@@ -408,11 +430,12 @@ void StgRunIsImplementedInAssembler(void)
 #if HAVE_SUBSECTIONS_VIA_SYMBOLS
             // if the toolchain supports deadstripping, we have to
             // prevent it here (it tends to get confused here).
-        __asm__ volatile (".no_dead_strip _StgRunIsImplementedInAssembler");
+        __asm__ volatile (".no_dead_strip _StgRunIsImplementedInAssembler\n");
 #endif
         __asm__ volatile (
-                "\n.globl _StgRun\n"
-                "_StgRun:\n"
+                STG_GLOBAL STG_RUN "\n"
+                STG_HIDDEN STG_RUN "\n"
+                STG_RUN ":\n"
                 "\tmflr r0\n"
                 "\tbl saveFP # f14\n"
                 "\tstmw r13,-220(r1)\n"
@@ -421,8 +444,9 @@ void StgRunIsImplementedInAssembler(void)
                 "\tmtctr r3\n"
                 "\tmr r12,r3\n"
                 "\tbctr\n"
-                ".globl _StgReturn\n"
-                "_StgReturn:\n"
+                STG_GLOBAL STG_RETURN "\n"
+                STG_HIDDEN STG_RETURN "\n"
+                STG_RETURN ":\n"
                 "\tmr r3,r14\n"
                 "\tla r1,%0(r1)\n"
                 "\tlmw r13,-220(r1)\n"
@@ -441,13 +465,16 @@ void StgRunIsImplementedInAssembler(void)
 // *) The Link Register is saved to a different offset in the caller's stack frame
 //    (Linux: 4(r1), Darwin 8(r1))
 
+#define STG_FUNCTION(SYMBOL) ".type " SYMBOL ",@function"
+
 static void GNUC3_ATTRIBUTE(used)
 StgRunIsImplementedInAssembler(void)
 {
         __asm__ volatile (
-                "\t.globl StgRun\n"
-                "\t.type StgRun,@function\n"
-                "StgRun:\n"
+                STG_GLOBAL STG_RUN "\n"
+                STG_HIDDEN STG_RUN "\n"
+                STG_FUNCTION(STG_RUN) "\n"
+                STG_RUN ":\n"
                 "\tmflr 0\n"
                 "\tstw 0,4(1)\n"
                 "\tmr 5,1\n"
@@ -475,9 +502,10 @@ StgRunIsImplementedInAssembler(void)
                 "\tmtctr 3\n"
                 "\tmr 12,3\n"
                 "\tbctr\n"
-                ".globl StgReturn\n"
-                "\t.type StgReturn,@function\n"
-                "StgReturn:\n"
+                STG_GLOBAL STG_RETURN "\n"
+                STG_HIDDEN STG_RETURN "\n"
+                STG_FUNCTION(STG_RETURN) "\n"
+                STG_RETURN ":\n"
                 "\tmr 3,14\n"
                 "\tla 5,%0(1)\n"
                 "\tlmw 13,-220(5)\n"
@@ -517,6 +545,11 @@ StgRunIsImplementedInAssembler(void)
 
 #ifdef powerpc64_HOST_ARCH
 
+#define STG_GLOBAL ".globl "
+#define STG_HIDDEN ".hidden "
+#define STG_FUNCTION(SYMBOL) ".type " SYMBOL ",@function"
+#define STG_DOTTED(SYMBOL) "." SYMBOL
+
 #ifdef linux_HOST_OS
 extern StgRegTable * StgRun(StgFunPtr f, StgRegTable *basereg);
 
@@ -533,18 +566,21 @@ StgRunIsImplementedInAssembler(void)
         __asm__ volatile (
                 ".section \".opd\",\"aw\"\n"
                 ".align 3\n"
-                ".globl StgRun\n"
-                "StgRun:\n"
-                "\t.quad\t.StgRun,.TOC.@tocbase,0\n"
-                "\t.size StgRun,24\n"
-                ".globl StgReturn\n"
-                "StgReturn:\n"
-                "\t.quad\t.StgReturn,.TOC.@tocbase,0\n"
-                "\t.size StgReturn,24\n"
+                STG_GLOBAL STG_RUN "\n"
+                STG_HIDDEN STG_RUN "\n"
+                STG_RUN ":\n"
+                "\t.quad\t" STG_DOTTED(STG_RUN) ",.TOC.@tocbase,0\n"
+                "\t.size " STG_RUN ",24\n"
+                STG_GLOBAL STG_RETURN "\n"
+                STG_HIDDEN STG_RETURN "\n"
+                STG_RETURN ":\n"
+                "\t.quad\t" STG_DOTTED(STG_RETURN) ",.TOC.@tocbase,0\n"
+                "\t.size " STG_RETURN ",24\n"
                 ".previous\n"
-                ".globl .StgRun\n"
-                ".type .StgRun,@function\n"
-                ".StgRun:\n"
+                STG_GLOBAL STG_DOTTED(STG_RUN) "\n"
+                STG_HIDDEN STG_DOTTED(STG_RUN) "\n"
+                STG_FUNCTION(STG_DOTTED(STG_RUN)) "\n"
+                STG_DOTTED(STG_RUN) ":\n"
                 "\tmflr 0\n"
                 "\tmr 5, 1\n"
                 "\tstd 0, 16(1)\n"
@@ -591,9 +627,10 @@ StgRunIsImplementedInAssembler(void)
                 "\tld 3, 0(3)\n"
                 "\tmtctr 3\n"
                 "\tbctr\n"
-                ".globl .StgReturn\n"
-                ".type .StgReturn,@function\n"
-                ".StgReturn:\n"
+                STG_GLOBAL STG_DOTTED(STG_RETURN) "\n"
+                STG_HIDDEN STG_DOTTED(STG_RETURN) "\n"
+                STG_FUNCTION(STG_DOTTED(STG_RETURN)) "\n"
+                STG_DOTTED(STG_RETURN) ":\n"
                 "\tmr 3,14\n"
                 "\tla 5, %0(1)\n" // load address == addi r5, r1, %0
                 "\tld 2, -296(5)\n"
@@ -652,12 +689,23 @@ StgRunIsImplementedInAssembler(void)
 
 #ifdef arm_HOST_ARCH
 
+#define STG_GLOBAL ".globl "
+
+#ifdef ios_HOST_OS
+#define STG_HIDDEN ".private_extern "
+#define STG_FUNCTION(SYMBOL) /* empty */
+#else
+#define STG_HIDDEN ".hidden "
+#define STG_FUNCTION(SYMBOL) ".type " SYMBOL ", %%function\n"
+#endif
+
 #if defined(__thumb__)
-#define THUMB_FUNC ".thumb\n\t.thumb_func\n\t"
+#define THUMB_FUNC ".thumb\n.thumb_func\n"
 #else
 #define THUMB_FUNC
 #endif
 
+RTS_PRIVATE
 StgRegTable *
 StgRun(StgFunPtr f, StgRegTable *basereg) {
     StgRegTable * r;
@@ -682,13 +730,12 @@ StgRun(StgFunPtr f, StgRegTable *basereg) {
         /*
          * Jump to function argument.
          */
-        "bx %1\n\t"
+        "bx %1\n"
 
-        ".globl " STG_RETURN "\n\t"
+        STG_GLOBAL STG_RETURN "\n"
+        STG_HIDDEN STG_RETURN "\n"
         THUMB_FUNC
-#if !defined(ios_HOST_OS)
-        ".type " STG_RETURN ", %%function\n"
-#endif
+        STG_FUNTION(STG_RETURN)
         STG_RETURN ":\n\t"
         /*
          * Free the space we allocated
